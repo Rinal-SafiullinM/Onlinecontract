@@ -5,19 +5,21 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta
-
+from selenium.webdriver.chrome.service import Service
+from selenium import webdriver
 import requests
 from lxml import html
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.wait import WebDriverWait
-from seleniumrequests import Chrome
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 base_path = os.path.dirname(currentdir)
 sys.path.append(base_path)
 sys.path.append('/home/manage_report')
+
+
 # from Send_report.Utils import send_to_api
 # from Send_report.mywrapper import magicDB
 
@@ -30,32 +32,25 @@ class Parser:
         self.last_item_date = None
         self.url = None
         self.sid = None
-        self.mode = 'prod'
+        self.mode = 'dev'
+        self.options = Options()
+        self.options.add_argument('--headless')
+        self.options.add_argument('--no-sandbox')
+        self.options.add_argument('--disable-dev-shm-usage')
+        self.options.add_argument('--blink-settings=imagesEnabled=false')
 
-    def init_browser(self):
-        options = Options()
-        options.headless = True
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--blink-settings=imagesEnabled=false')
+        self.options.add_argument('--disable-infobars')
+        self.options.add_argument('--disable-browser-side-navigation')
+        self.options.add_argument('--disable-gpu')
 
-        options.add_argument('--disable-infobars')
-        options.add_argument('--disable-browser-side-navigation')
-        options.add_argument('--disable-gpu')
+        self.options.add_argument('--log-level=3')
 
-        options.add_argument('--log-level=3')
-
-        if self.mode == 'dev':
-            self.browser = Chrome(
-                executable_path=os.path.realpath('/chromedriver.exe'.format(base_path)),
-                options=options,
-            )
-        else:
-            self.browser = Chrome(
-                executable_path='/chromedriver.exe',
-                options=options,
-            )
+        if os.name == 'nt':
+            self.chrome_path = 'chromedriver.exe'
+        if os.name == 'posix':
+            self.chrome_path = '/home/service/chromedriver'
+        s = Service(executable_path=self.chrome_path)
+        self.browser = webdriver.Chrome(service=s, options=self.options)
 
     def auth(self):
         login = 'gmx836190380'
@@ -105,7 +100,7 @@ class Parser:
 
     def get_data(self, item):
         item_url = 'https://onlinecontract.ru/otp/index.phtml?sid={}'.format(item['procedureSID'])
-
+        id = item['id']
         item_data = {
             'fz': 'Коммерческие',
             'purchaseNumber': item['id'],
@@ -150,20 +145,13 @@ class Parser:
             'attachments': [],
         }
 
-        self.browser.get(item_url)
+        self.browser.get('https://onlinecontract.ru/otp/Zakupki/' + str(id))
         html_string = WebDriverWait(self.browser, 3).until(
             ec.presence_of_element_located((By.XPATH, "//html"))
         ).get_attribute('innerHTML')
         # print(html_string)
 
         tree = html.document_fromstring(html_string)
-        # item_data['customer']['factAddress'] = ''.join(tree.xpath("//script[@class='r_table']"))
-        try:
-            adress = ''.join(tree.xpath("//script[@id='OTP-state']"))
-            print(adress.partition("owner&q;:{&q;id&q;:")[2].split(",")[0])
-            #print(adress)
-        except Exception as e:
-            print(e)
 
         deliveryAddress = ''.join(tree.xpath(
             "/html/body/div[2]/table[2]/tbody/tr[2]/td[2]/table[1]/tbody/tr/td/table/tbody/tr/td[1]/table/tbody/tr[20]/td[3]/span/text()"
@@ -208,7 +196,8 @@ class Parser:
                 r'([\w0-9-._]+@[\w0-9-.]+[\w0-9]{2,3})', contact_item)
             )
 
-        elements = tree.xpath("/html/body/div[2]/table[2]/tbody/tr[2]/td[2]/table[1]/tbody/tr/td/table/tbody/tr/td[1]/table/tbody/tr[3]/td[3]//a")
+        elements = tree.xpath(
+            "/html/body/div[2]/table[2]/tbody/tr[2]/td[2]/table[1]/tbody/tr/td/table/tbody/tr/td[1]/table/tbody/tr[3]/td[3]//a")
         for element in elements:
             html_string = html.tostring(
                 element, encoding='unicode', method='html', with_tail=False
@@ -238,8 +227,6 @@ class Parser:
 
     # @magicDB
     def run(self):
-        self.init_browser()
-
         if self.auth() is not True:
             self.ads_count = 'Произошла ошибка авторизации. На данном ресурсе она является обязательной.'
             self.close_browser()
@@ -272,7 +259,6 @@ class Parser:
 
                 if len(json.loads(html_string)['procedureList']) > 0 and page_num == 1:
                     found_items = True
-
                 for item in json.loads(html_string)['procedureList']:
                     item_date = datetime.strptime(item['published'].split('T')[0], '%Y-%m-%d').date()
                     print(str(required_date), str(item_date))
@@ -310,8 +296,8 @@ class Parser:
         self.close_browser()
 
         data = {'name': 'onlinecontractru',
-                'data': ads}										
-        #send_to_api(data)
+                'data': ads}
+        # send_to_api(data)
         return data
 
 
@@ -325,7 +311,7 @@ if __name__ == '__main__':
         msg = '{}: {}\n'.format(parser.name, parser.ads_count)
 
     except Exception as e:
-        #print(msg)
+        # print(msg)
         print(e)
         msg = parser.name + ": ошибка" + "\n"
     print(msg)
